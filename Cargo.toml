@@ -1,0 +1,13 @@
+[package]
+name = "of_dn_parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+derive_more = { version = "0.99.17", default-features = false, features = ["display", "error", "from"] }
+hex = { version = "0.4.3", default-features = false, features = ["std"] }
+once_cell = { version = "1.19.0", default-features = false, features = ["std"] }
+regex = { version = "1.10.2", default-features = false, features = ["perf", "std", "unicode-case"] }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.0", default-features = false, features = ["std"] }

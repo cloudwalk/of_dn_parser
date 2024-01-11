@@ -71,12 +71,10 @@ impl DistinguishedName {
     pub fn comparator(&self) -> Result<DnComparator> {
         DnComparator::new(self)
     }
-}
 
-/// Serialize into the OpenFinance variant string format:
-/// <https://openfinancebrasil.atlassian.net/wiki/spaces/OF/pages/240649661/EN+Open+Finance+Brasil+Financial-grade+API+Dynamic+Client+Registration+1.0+Implementers+Draft+3#7.1.2.-Certificate-Distinguished-Name-Parsing>.
-impl ToString for DistinguishedName {
-    fn to_string(&self) -> String {
+    /// Serialize into the OpenFinance variant string format:
+    /// <https://openfinancebrasil.atlassian.net/wiki/spaces/OF/pages/240649661/EN+Open+Finance+Brasil+Financial-grade+API+Dynamic+Client+Registration+1.0+Implementers+Draft+3#7.1.2.-Certificate-Distinguished-Name-Parsing>.
+    pub fn to_of_string(&self) -> String {
         let mut res = String::new();
         for (i, rdn) in self.rdns.iter().rev().enumerate() {
             if i > 0 {

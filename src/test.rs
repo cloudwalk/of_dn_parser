@@ -9,7 +9,7 @@ fn parse_empty_dn() {
     let dn = DistinguishedName::from_str("").unwrap();
 
     assert_eq!(dn.comparator().unwrap(), DnComparator { rdns: Vec::new() });
-    assert_eq!(dn.to_string(), "");
+    assert_eq!(dn.to_of_string(), "");
 }
 
 #[test]
@@ -65,5 +65,5 @@ fn parse_dn() {
             ]
         }
     );
-    assert_eq!(dn.to_string(), DISTINGUISHED_NAME);
+    assert_eq!(dn.to_of_string(), DISTINGUISHED_NAME);
 }

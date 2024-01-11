@@ -548,7 +548,7 @@ impl FromStr for RdnType {
             // https://datatracker.ietf.org/doc/html/rfc4519#section-2.1
             "businesscategory" | "2.5.4.15" => Ok(Self::BusinessCategory),
             // https://oidref.com/1.3.6.1.4.1.311.60.2.1.3
-            "jurisdictioncountryname" | "1.3.6.1.4.1.311.60.2.1.3" => {
+            "jurisdictioncountryname" | "jurisdictionc" | "1.3.6.1.4.1.311.60.2.1.3" => {
                 Ok(Self::JurisdictionCountryName)
             }
             // https://datatracker.ietf.org/doc/html/rfc4519#section-2.31

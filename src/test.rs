@@ -1,8 +1,11 @@
 use std::str::FromStr;
 
+use assert_matches::assert_matches;
 use pretty_assertions::assert_eq;
 
-use crate::{DistinguishedName, DnComparator, RdnComparator, RdnType};
+use crate::{
+    DistinguishedName, DnComparator, Error, RdnComparator, RdnType, RelativeDistinguishedName,
+};
 
 #[test]
 fn parse_empty_dn() {
@@ -65,5 +68,102 @@ fn parse_dn() {
             ]
         }
     );
-    assert_eq!(dn.to_of_string(), DISTINGUISHED_NAME);
+    assert_eq!(dn.to_of_string(), DISTINGUISHED_NAME.replace(' ', r"\ "));
+}
+
+#[test]
+fn reject_trailing_comma() {
+    let dn = DistinguishedName::from_str(",");
+
+    assert_matches!(dn, Err(Error::UnexpectedCharacter(',')));
+}
+
+#[test]
+fn reject_trailing_backslash() {
+    let dn = DistinguishedName::from_str("\\");
+
+    assert_matches!(dn, Err(Error::UnexpectedEof));
+}
+
+#[test]
+fn reject_isolated_equals_sign() {
+    let dn = DistinguishedName::from_str("=");
+
+    assert_matches!(dn, Err(Error::UnexpectedCharacter('=')));
+}
+
+#[test]
+fn reject_rdn_without_equals_sign() {
+    let dn = DistinguishedName::from_str("CN");
+
+    assert_matches!(dn, Err(Error::UnexpectedEof));
+}
+
+#[test]
+fn reject_rdn_without_value() {
+    let dn = DistinguishedName::from_str("CN= ");
+
+    assert_matches!(dn, Err(Error::UnexpectedEof));
+}
+
+#[test]
+fn reject_rdn_without_type() {
+    let dn = DistinguishedName::from_str(" =test");
+
+    assert_matches!(dn, Err(Error::UnexpectedCharacter('=')));
+}
+
+#[test]
+fn correctly_trim_spaces() {
+    let dn = DistinguishedName::from_str("  CN =\t test   ").unwrap();
+
+    assert_eq!(dn.to_of_string(), "CN=test");
+}
+
+#[test]
+fn correctly_decode_symbol_escape_sequence() {
+    let dn = DistinguishedName::from_str(r"CN=test\,C\=test").unwrap();
+
+    assert_eq!(
+        dn.comparator().unwrap(),
+        DnComparator {
+            rdns: vec![RdnComparator {
+                ty: RdnType::Cn,
+                value: "test,C=test".to_owned()
+            }]
+        }
+    );
+}
+
+#[test]
+fn correctly_decode_hex_escape_sequence() {
+    let dn = DistinguishedName::from_str(r"CN=\61").unwrap();
+
+    assert_eq!(dn.to_of_string(), "CN=a");
+}
+
+#[test]
+fn correctly_escape_special_symbol_in_to_of_string() {
+    let dn = DistinguishedName {
+        rdns: vec![RelativeDistinguishedName {
+            ty: RdnType::Cn,
+            value: r#" ",#+,;<=>\"#.to_owned(),
+        }],
+    };
+
+    assert_eq!(dn.to_of_string(), r#"CN=\ \"\,\#\+\,\;\<\=\>\\"#);
+}
+
+#[test]
+fn reject_invalid_utf8_string_through_escape_sequences() {
+    let dn = DistinguishedName::from_str(r"CN=\c3\28");
+
+    assert_matches!(dn, Err(Error::Utf8(_)) | Err(Error::FromUtf8(_)));
+}
+
+#[test]
+fn reject_invalid_utf8_string_in_hex_value() {
+    let dn = DistinguishedName::from_str(r"CN=#c328");
+
+    assert_matches!(dn, Err(Error::Utf8(_)) | Err(Error::FromUtf8(_)));
 }

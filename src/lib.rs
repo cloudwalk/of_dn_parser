@@ -3,7 +3,7 @@
 
 use std::{
     result,
-    str::{self, FromStr},
+    str::{self, FromStr, Utf8Error},
     string::FromUtf8Error,
 };
 
@@ -11,6 +11,9 @@ use derive_more::{Display, Error, From};
 
 #[cfg(test)]
 mod test;
+
+// List of symbols that must be escaped with a backslash
+const ESCAPABLE_SYMBOLS: [char; 10] = [' ', '"', '#', '+', ',', ';', '<', '=', '>', '\\'];
 
 /// Possible errors when parsing distinguished names.
 #[derive(Debug, Display, Error, From)]
@@ -36,7 +39,9 @@ pub enum Error {
     #[display(fmt = "multi-value RDNs are not supported")]
     UnsupportedMultiValueRdns,
     /// Found a non-UTF-8 string.
-    Utf8(FromUtf8Error),
+    FromUtf8(FromUtf8Error),
+    /// Found a non-UTF-8 string.
+    Utf8(Utf8Error),
 }
 
 /// Parsing result type.
@@ -89,7 +94,16 @@ impl DistinguishedName {
                 res.push('#');
                 res += &hex::encode(value);
             } else {
-                res += value;
+                res.reserve(value.len());
+                for c in value.chars() {
+                    if ESCAPABLE_SYMBOLS.contains(&c) {
+                        // Note: for simplicity we'll be escaping everything
+                        // we can unconditionally even when this is not
+                        // necesary
+                        res.push('\\');
+                    }
+                    res.push(c);
+                }
             }
         }
 
@@ -106,41 +120,40 @@ impl FromStr for DistinguishedName {
         // This format is faily straightforward and so the parser is
         // implemented manually. Parser crates wouldn't help by much.
         let mut rdns = Vec::new();
-        let mut acc = String::new();
-        let mut is_escaped = false;
+        let mut acc = Vec::new();
+        let mut escaping = Escaping::None;
         let mut value_is_hex = false;
         let mut ty = None::<RdnType>;
-        let chars = s.chars().map(ParseItem::from).chain([ParseItem::Eof]);
+        let chars = s.bytes().map(ParseItem::from).chain([ParseItem::Eof]);
         for c in chars {
-            if is_escaped {
-                is_escaped = false;
-                let ParseItem::Char(c) = c else {
+            if escaping.is_pending() {
+                let ParseItem::Byte(c) = c else {
                     // Cannot end a DN with a backslash
                     return Err(Error::UnexpectedEof);
                 };
-                if ![' ', '"', '#', '+', ',', ';', '<', '=', '>', '\\'].contains(&c) {
-                    // TODO: the problem here is that `acc` is a String but
-                    // with hex-escaped bytes we'd have to defer UTF-8 checks
-                    // until the whole value has been read
-                    unimplemented!("Hex-escaped characters are not implemented");
+                if let Some(escaped) = escaping.consume(c)? {
+                    acc.push(escaped);
                 }
-                acc.push(c);
 
                 continue;
             }
 
             match c {
                 // A DN is a list of RDNs separated by commas
-                ParseItem::Char(',') | ParseItem::Eof => {
-                    let value = acc.trim();
+                ParseItem::Byte(b',') | ParseItem::Eof => {
+                    let value = str::from_utf8(&acc)?.trim();
                     if value.is_empty() {
                         if c.is_eof() && ty.is_none() {
-                            // EOF and the RDN is incomplete
+                            // EOF and the DN is complete
                             break;
                         } else {
                             // We already parsed a type but this RDN is
                             // missing a value
-                            return Err(Error::UnexpectedEof);
+                            return if c.is_eof() {
+                                Err(Error::UnexpectedEof)
+                            } else {
+                                Err(Error::UnexpectedCharacter(','))
+                            };
                         }
                     }
 
@@ -170,33 +183,38 @@ impl FromStr for DistinguishedName {
                 }
                 // An RDN is an RDN type and a value separated by an equals
                 // sign
-                ParseItem::Char('=') => {
+                ParseItem::Byte(b'=') => {
                     if ty.is_some() {
                         // Something like 'a = b = c' is not a valid RDN
                         return Err(Error::UnexpectedCharacter('='));
                     }
 
-                    ty = Some(acc.trim().parse()?);
+                    let ty_str = str::from_utf8(&acc)?.trim();
+                    if ty_str.is_empty() {
+                        return Err(Error::UnexpectedCharacter('='));
+                    }
+
+                    ty = Some(ty_str.parse()?);
                     acc.clear();
                 }
                 // A backslash starts an escape sequence
-                ParseItem::Char('\\') => {
-                    is_escaped = true;
+                ParseItem::Byte(b'\\') => {
+                    escaping = Escaping::Started;
                 }
                 // An octothorpe right after the equals sign means that the
                 // value is an encoded hex string
-                ParseItem::Char('#') => {
+                ParseItem::Byte(b'#') => {
                     if acc.is_empty() {
                         value_is_hex = true;
                     } else {
-                        acc.push('#');
+                        acc.push(b'#');
                     }
                 }
                 // A plus sign is used to define multi-valued RDNs but we have
                 // no need for this here
-                ParseItem::Char('+') => return Err(Error::UnsupportedMultiValueRdns),
-                // Every other character is a literal
-                ParseItem::Char(c) => acc.push(c),
+                ParseItem::Byte(b'+') => return Err(Error::UnsupportedMultiValueRdns),
+                // Every other byte is a literal
+                ParseItem::Byte(c) => acc.push(c),
             }
         }
 
@@ -210,7 +228,7 @@ impl FromStr for DistinguishedName {
 
 #[derive(Clone, Copy)]
 enum ParseItem {
-    Char(char),
+    Byte(u8),
     Eof,
 }
 
@@ -220,9 +238,48 @@ impl ParseItem {
     }
 }
 
-impl From<char> for ParseItem {
-    fn from(value: char) -> Self {
-        Self::Char(value)
+impl From<u8> for ParseItem {
+    fn from(value: u8) -> Self {
+        Self::Byte(value)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Escaping {
+    None,
+    Started,
+    Hex(u8),
+}
+
+impl Escaping {
+    fn is_pending(self) -> bool {
+        matches!(self, Self::Started | Self::Hex(_))
+    }
+
+    fn consume(&mut self, c: u8) -> Result<Option<u8>> {
+        match *self {
+            Self::Started => {
+                if ESCAPABLE_SYMBOLS.contains(&(c as char)) {
+                    *self = Self::None;
+
+                    Ok(Some(c))
+                } else {
+                    *self = Self::Hex(c);
+
+                    Ok(None)
+                }
+            }
+            Self::Hex(previous) => {
+                *self = Self::None;
+                let mut byte = [0; 1];
+                hex::decode_to_slice([previous, c], &mut byte)?;
+
+                Ok(Some(byte[0]))
+            }
+            Self::None => {
+                unreachable!("BUG: called `Escaping::consume` when no escaping is active")
+            }
+        }
     }
 }
 

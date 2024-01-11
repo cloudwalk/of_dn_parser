@@ -14,4 +14,5 @@ derive_more = { version = "0.99.17", default-features = false, features = ["disp
 hex = { version = "0.4.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+assert_matches = { version = "1.5.0", default-features = false }
 pretty_assertions = { version = "1.4.0", default-features = false, features = ["std"] }

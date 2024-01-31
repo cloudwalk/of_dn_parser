@@ -2,7 +2,7 @@
 name = "of_dn_parser"
 description = "Parser (and formatter) for OpenFinance Brasil standard distinguished names"
 authors = ["cloudwalk.io"]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cloudwalk/of_dn_parser"

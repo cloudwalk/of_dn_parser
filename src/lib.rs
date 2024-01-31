@@ -2,6 +2,7 @@
 //! Brasil's DCR 1.0 standard.
 
 use std::{
+    borrow::Cow,
     result,
     str::{self, FromStr, Utf8Error},
     string::FromUtf8Error,
@@ -67,6 +68,30 @@ impl DistinguishedName {
     /// Returns an iterator over all RDNs of this DN.
     pub fn iter(&self) -> impl Iterator<Item = &RelativeDistinguishedName> {
         self.rdns.iter()
+    }
+
+    /// Get the organization ID of this certificate. The way organization IDs
+    /// are specified in OpenFinance certificates is a special kind of mess so
+    /// we need a specific function for this.
+    pub fn organization_id(&self) -> Result<Option<Cow<str>>> {
+        // For newer certificates, the organization ID should be the value of
+        // `OU` and the spec also leaves open the possibility of it being the
+        // value of `organizationalUnitName`
+        let org_id = self
+            .find(RdnType::Ou)
+            .or_else(|| self.find(RdnType::OrganizationalUnitName));
+        if let Some(org_id) = org_id {
+            return Ok(Some(org_id.into()));
+        }
+
+        // For older certificates, we have nightmare as the value of
+        // `organizationIdentifier`
+        let Some(org_id) = self.find(RdnType::OrganizationIdentifier) else {
+            return Ok(None);
+        };
+        let org_id = org_id.to_ascii_lowercase();
+
+        Ok(Some(extract_organization_id(&org_id)?.into()))
     }
 
     /// Create a comparator for this DN.
@@ -392,31 +417,9 @@ impl RdnComparator {
             value.make_ascii_lowercase();
         }
 
-        // Clean the value of `organizationIdentifier` according to the OF
-        // spec.
-        //
-        // One day the people working on the OpenFinance spec woke up with the
-        // most brilliant idea ever: how about we add extra arbitrary
-        // complexity for absolutely no reason at all? 'Genius!' they thought.
-        // And so in their infinite wisdom they added the following:
-        //
-        // [...] convert ASN.1 values from OID 2.5.4.97 organizationIdentifier
-        // to human readable text [...] retrieve the full value of the OID
-        // 2.5.4.97 contained in the subject_DN. [...] Apply a filter using
-        // regular expression to retrieve the org_id after ('OFBBR-')
-        //
-        // https://openfinancebrasil.atlassian.net/wiki/spaces/OF/pages/240649661/EN+Open+Finance+Brasil+Financial-grade+API+Dynamic+Client+Registration+1.0+Implementers+Draft+3#7.1.2.-Certificate-Distinguished-Name-Parsing
-        //
-        // That is, for `organizationIdentifier` ONLY, it is permissible to have
-        // any amount of garbage before `OFBBR-`. Luckly this RDN is
-        // case-insensitive so its value is lower case now and we don't need
-        // an actual regex.
+        // Specifically this RDN requires extra processing
         if ty == RdnType::OrganizationIdentifier {
-            let idx = value.find("ofbbr-").ok_or_else(|| Error::InvalidValue {
-                ty: RdnType::OrganizationIdentifier,
-                value: value.to_owned(),
-            })?;
-            value = value[idx..].to_owned();
+            value = extract_organization_id(&value)?;
         }
 
         Ok(Self {
@@ -560,4 +563,30 @@ impl FromStr for RdnType {
             _ => Err(Error::InvalidType(s.to_owned())),
         }
     }
+}
+
+// Clean the value of `organizationIdentifier` according to the OF spec.
+//
+// One day the people working on the OpenFinance spec woke up with the most
+// brilliant idea ever: how about we add extra arbitrary complexity for
+// absolutely no reason at all? 'Genius!' they thought. And so in their
+// infinite wisdom they added the following:
+//
+// [...] convert ASN.1 values from OID 2.5.4.97 organizationIdentifier to
+// human readable text [...] retrieve the full value of the OID 2.5.4.97
+// contained in the subject_DN. [...] Apply a filter using regular expression
+// to retrieve the org_id after ('OFBBR-')
+//
+// https://openfinancebrasil.atlassian.net/wiki/spaces/OF/pages/240649661/EN+Open+Finance+Brasil+Financial-grade+API+Dynamic+Client+Registration+1.0+Implementers+Draft+3#7.1.2.-Certificate-Distinguished-Name-Parsing
+//
+// That is, for `organizationIdentifier` ONLY, it is permissible to have any
+// amount of garbage before `OFBBR-`. Luckly we can assume here that this
+// value is lower case and we don't need an actual regex.
+fn extract_organization_id(org_id: &str) -> Result<String> {
+    let idx = org_id.find("ofbbr-").ok_or_else(|| Error::InvalidValue {
+        ty: RdnType::OrganizationIdentifier,
+        value: org_id.to_owned(),
+    })?;
+
+    Ok(org_id[idx..].to_owned())
 }

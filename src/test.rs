@@ -7,6 +7,8 @@ use crate::{
     DistinguishedName, DnComparator, Error, RdnComparator, RdnType, RelativeDistinguishedName,
 };
 
+const ORGANIZATION_ID: &str = "d7384bd0-842f-43c5-be02-9d2b2d5efc2c";
+
 #[test]
 fn parse_empty_dn() {
     let dn = DistinguishedName::from_str("").unwrap();
@@ -55,7 +57,7 @@ fn parse_dn() {
                 }),
                 (RdnComparator {
                     ty: RdnType::OrganizationIdentifier,
-                    value: "ofbbr-d7384bd0-842f-43c5-be02-9d2b2d5efc2c".to_owned()
+                    value: "d7384bd0-842f-43c5-be02-9d2b2d5efc2c".to_owned()
                 }),
                 (RdnComparator {
                     ty: RdnType::Uid,
@@ -166,4 +168,43 @@ fn reject_invalid_utf8_string_in_hex_value() {
     let dn = DistinguishedName::from_str(r"CN=#c328");
 
     assert_matches!(dn, Err(Error::Utf8(_)) | Err(Error::FromUtf8(_)));
+}
+
+#[test]
+fn organization_id_in_ou() {
+    let dn = DistinguishedName {
+        rdns: vec![RelativeDistinguishedName {
+            ty: RdnType::Ou,
+            value: ORGANIZATION_ID.to_owned(),
+        }],
+    };
+    let org_id = dn.organization_id().unwrap().unwrap();
+
+    assert_eq!(org_id, ORGANIZATION_ID);
+}
+
+#[test]
+fn organization_id_in_organizational_unit_name() {
+    let dn = DistinguishedName {
+        rdns: vec![RelativeDistinguishedName {
+            ty: RdnType::OrganizationalUnitName,
+            value: ORGANIZATION_ID.to_owned(),
+        }],
+    };
+    let org_id = dn.organization_id().unwrap().unwrap();
+
+    assert_eq!(org_id, ORGANIZATION_ID);
+}
+
+#[test]
+fn organization_id_in_organization_identifier() {
+    let dn = DistinguishedName {
+        rdns: vec![RelativeDistinguishedName {
+            ty: RdnType::OrganizationIdentifier,
+            value: format!("*&*&*OFBBR-{ORGANIZATION_ID}"),
+        }],
+    };
+    let org_id = dn.organization_id().unwrap().unwrap();
+
+    assert_eq!(org_id, ORGANIZATION_ID);
 }

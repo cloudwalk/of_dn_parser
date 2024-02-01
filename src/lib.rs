@@ -583,10 +583,13 @@ impl FromStr for RdnType {
 // amount of garbage before `OFBBR-`. Luckly we can assume here that this
 // value is lower case and we don't need an actual regex.
 fn extract_organization_id(org_id: &str) -> Result<String> {
-    let idx = org_id.find("ofbbr-").ok_or_else(|| Error::InvalidValue {
+    const PREFIX: &str = "ofbbr-";
+
+    let mut idx = org_id.find(PREFIX).ok_or_else(|| Error::InvalidValue {
         ty: RdnType::OrganizationIdentifier,
         value: org_id.to_owned(),
     })?;
+    idx += PREFIX.len();
 
     Ok(org_id[idx..].to_owned())
 }
